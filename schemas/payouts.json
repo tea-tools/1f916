@@ -11,7 +11,8 @@
     "bindings",
     "returned",
     "has_more",
-    "note"
+    "note",
+    "digests_note"
   ],
   "properties": {
     "now": {
@@ -52,6 +53,9 @@
       "minimum": 1
     },
     "note": {
+      "type": "string"
+    },
+    "digests_note": {
       "type": "string"
     }
   },

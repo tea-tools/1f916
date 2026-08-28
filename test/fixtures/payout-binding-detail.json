@@ -33,6 +33,23 @@
   "docket_changed_since_binding": false,
   "preimage": "1f916.payout.v1:citizen:earning-economy:10000000:8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913:0x1111111111111111111111111111111111111111:1786635000",
   "authorization_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "authorization_hash_recipe": {
+    "algorithm": "sha256",
+    "encoding": "UTF-8 bytes of the preimage STRING exactly as served, with no JSON encoding of any kind. THIS IS NOT THE JSON-ARRAY RULE used by payload_hash_recipe on this same response: do not wrap the string in quotes, do not build an array, do not escape anything. Hash the bytes you were given.",
+    "preimage_from": "preimage",
+    "preimage_fields": [
+      "version",
+      "handle",
+      "row",
+      "amount_atomic",
+      "chain_id",
+      "token",
+      "address",
+      "expiry"
+    ],
+    "preimage_separator": ":",
+    "preimage_note": "Rebuild: the values named by preimage_fields in order, joined with preimage_separator. token and address are lowercased; chain_id and expiry are decimal strings of the integers. Values are keys of this response body, not of `payload`. The separator is refused inside any field, so the join cannot be forged by a value containing it. Check the rebuilt string against preimage BEFORE hashing: matching a digest against the string it was taken over proves only self-consistency, and it is the string that carries the meaning."
+  },
   "payload_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "payload": {
     "version": "1f916.payout.v1",
@@ -178,7 +195,27 @@
     "funder_address": "0x2222222222222222222222222222222222222222",
     "funder_statement": "1f916.payout-funder.v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:8453:0x833589fcd6edb6e08f4c7c32d4f71b54bda02913:0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc:3:0x2222222222222222222222222222222222222222:0x1111111111111111111111111111111111111111:10000000:independent",
     "funder_signature": "0x5555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555",
-    "funder_attestation_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+    "funder_attestation_hash": "6666666666666666666666666666666666666666666666666666666666666666",
+    "funder_attestation_hash_recipe": {
+      "algorithm": "sha256",
+      "encoding": "UTF-8 bytes of the preimage STRING exactly as served, with no JSON encoding of any kind. THIS IS NOT THE JSON-ARRAY RULE used by payload_hash_recipe on this same response: do not wrap the string in quotes, do not build an array, do not escape anything. Hash the bytes you were given.",
+      "preimage_from": "funder_statement",
+      "preimage_constant_prefix": "1f916.payout-funder.v1",
+      "preimage_fields": [
+        "binding_payload_hash",
+        "chain_id",
+        "token",
+        "tx_hash",
+        "transfer_log_index",
+        "source_address",
+        "address",
+        "amount_atomic",
+        "funding_relationship"
+      ],
+      "preimage_separator": ":",
+      "values_from": "payload",
+      "preimage_note": "Rebuild: preimage_constant_prefix, then the values named by preimage_fields in order, joined with preimage_separator. token, tx_hash, source_address and address are lowercased; chain_id and transfer_log_index are decimal strings of the integers. NOTE THE PREFIX: it is the payout-funder version constant, NOT the binding's `version` field, which is a different string on this same response. The separator is refused inside any field, so the join cannot be forged by a value containing it. Check the rebuilt string against funder_statement BEFORE hashing: matching a digest against the string it was taken over proves only self-consistency, and it is the string that carries the meaning."
+    }
   },
   "note": "detail",
   "citizen_key_custody": "self",

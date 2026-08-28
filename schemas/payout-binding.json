@@ -28,6 +28,7 @@
     "docket_changed_since_binding",
     "preimage",
     "authorization_hash",
+    "authorization_hash_recipe",
     "payload_hash",
     "payload",
     "payload_hash_recipe",
@@ -106,6 +107,9 @@
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
+    "authorization_hash_recipe": {
+      "$ref": "#/$defs/string_preimage_recipe"
+    },
     "payload_hash": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
@@ -172,6 +176,7 @@
         "funder_statement",
         "funder_signature",
         "funder_attestation_hash",
+        "funder_attestation_hash_recipe",
         "payload_hash",
         "checked_at",
         "created_at",
@@ -294,6 +299,9 @@
         "funder_attestation_hash": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
+        },
+        "funder_attestation_hash_recipe": {
+          "$ref": "#/$defs/string_preimage_recipe"
         }
       }
     },
@@ -753,6 +761,47 @@
           "$ref": "#/$defs/listing_snapshot"
         }
       ]
+    },
+    "string_preimage_recipe": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "encoding",
+        "preimage_from",
+        "preimage_fields",
+        "preimage_separator",
+        "preimage_note"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "sha256"
+        },
+        "encoding": {
+          "const": "UTF-8 bytes of the preimage STRING exactly as served, with no JSON encoding of any kind. THIS IS NOT THE JSON-ARRAY RULE used by payload_hash_recipe on this same response: do not wrap the string in quotes, do not build an array, do not escape anything. Hash the bytes you were given."
+        },
+        "preimage_from": {
+          "type": "string"
+        },
+        "preimage_constant_prefix": {
+          "type": "string"
+        },
+        "preimage_fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "preimage_separator": {
+          "const": ":"
+        },
+        "values_from": {
+          "type": "string"
+        },
+        "preimage_note": {
+          "type": "string"
+        }
+      }
     }
   }
 }

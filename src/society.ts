@@ -43,6 +43,9 @@ import {
   PREIMAGE_EXPIRY_SLACK_SECONDS,
   PAYOUT_BINDING_HASH_FIELDS,
   PAYOUT_BINDINGS_PER_DAY,
+  PAYOUT_FUNDER_STATEMENT_FIELDS,
+  PAYOUT_FUNDER_VERSION,
+  PAYOUT_PREIMAGE_FIELDS,
   PAYOUT_RECEIPT_HASH_FIELDS,
   PAYOUT_RECEIPT_ATTEMPTS_PER_BINDING,
   PAYOUT_RECEIPT_ATTEMPTS_PER_HOUR,
@@ -3373,6 +3376,7 @@ export async function getPayoutBinding(env: Env, id: number) {
         ...receipt,
         payload: storedPayoutReceiptPayload(binding, receipt),
         payload_hash_recipe: { algorithm: "sha256", encoding: ENCODING_NOTE, fields: PAYOUT_RECEIPT_HASH_FIELDS, values_from: "payload", values_from_note: "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself." },
+        funder_attestation_hash_recipe: funderAttestationHashRecipe(),
         chain_anchor: await payoutAnchorByPayload(env, binding.citizen_id, "payout-receipt", String(receipt.payload_hash)),
       }
     : null;
@@ -3406,6 +3410,7 @@ export async function getPayoutBinding(env: Env, id: number) {
     docket_changed_since_binding: JSON.stringify(currentDocket) !== binding.docket_snapshot,
     preimage: binding.preimage,
     authorization_hash: binding.authorization_hash,
+    authorization_hash_recipe: authorizationHashRecipe(),
     payload_hash: binding.payload_hash,
     payload: bindingPayload,
     payload_hash_recipe: { algorithm: "sha256", encoding: ENCODING_NOTE, fields: PAYOUT_BINDING_HASH_FIELDS, values_from: "payload", values_from_note: "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself." },
@@ -3462,6 +3467,16 @@ export async function listPayouts(env: Env, docketId: string | null, sinceId = 0
     ...(results.length > PAYOUT_PAGE ? { next_since_id: Number(pageRows[pageRows.length - 1]!.id) } : {}),
     note:
       "Bindings are authorizations, not delivery verdicts or exclusive reservations. A joined receipt means two RPC sources agreed on a canonical finalized net-positive Base-USDC Transfer; funding_relationship is the payee's declaration, not an on-chain identity fact.",
+    // A row here carries three digests and NONE of the bytes they were taken
+    // over. Read as a whole surface that is a digest with no reproduction
+    // path, which is what a reader following it concluded out loud on 2026-08-28
+    // and published: that nobody outside could recompute, and therefore that a
+    // rewritten hashed column would go unnoticed. The opposite is true and the
+    // pointer was already on the row, called `record` — a name that says where
+    // the row lives and not that it is where the check happens. Naming it is
+    // one sentence and the misreading cost a published correction.
+    digests_note:
+      "authorization_hash, payload_hash and receipt_payload_hash appear on these rows WITHOUT the bytes they were taken over: this surface serves no preimage, no payload and no recipe, so nothing here can be recomputed and a digest read from this page can only be compared, never checked. THAT IS A PROPERTY OF THIS VIEW, NOT OF THE REGISTRY. Follow `record` (GET /api/payout-bindings/<id>) for the same row with `preimage`, `payload`, `funder_statement` and a published recipe for every one of its four digests, all reproducible without an account.",
   };
 }
 
@@ -7313,8 +7328,71 @@ export async function identityLog(env: Env, kind: string | null = null, sinceId:
 // citizen puts an accent or a dash in a listing title, which nothing stops.
 // Nobody reported this one; I hit it by following my own recipe as a stranger
 // would, which is the only way it surfaces.
-const ENCODING_NOTE =
+export const ENCODING_NOTE =
   "UTF-8 JSON array, compact: JSON.stringify semantics with no whitespace between elements, and NON-ASCII CHARACTERS ARE NOT ESCAPED. If your JSON library escapes them to \\uXXXX by default (Python's json.dumps does, unless you pass ensure_ascii=False), turn that off or you will hash different bytes and get a different digest for identical content.";
+
+
+// The encoding note for the two payout digests taken over a colon-joined
+// STRING rather than a compact JSON array. It is deliberately not
+// ENCODING_NOTE: a reader who copies the JSON-array rule onto these hashes
+// different bytes and gets a mismatch, and a mismatch on a payout digest is
+// something a stranger is entitled to read as tampering. Naming the difference
+// beside each recipe is cheaper than the misreading.
+export const STRING_PREIMAGE_ENCODING_NOTE =
+  "UTF-8 bytes of the preimage STRING exactly as served, with no JSON encoding of any kind. THIS IS NOT THE JSON-ARRAY RULE used by payload_hash_recipe on this same response: do not wrap the string in quotes, do not build an array, do not escape anything. Hash the bytes you were given.";
+
+// `fields` here DESCRIBES how the served preimage string is assembled, so a
+// reader can check that the string they were handed is the canonical one
+// rather than only that its digest matches itself. Values are joined with
+// `separator` in the order given, and the separator is refused inside any
+// field precisely so the join is unambiguous.
+export function stringPreimageRecipe(opts: {
+  fields: readonly string[];
+  preimageFrom: string;
+  valuesFrom?: string;
+  constantPrefix?: string;
+  normalization: string;
+}) {
+  return {
+    algorithm: "sha256",
+    encoding: STRING_PREIMAGE_ENCODING_NOTE,
+    preimage_from: opts.preimageFrom,
+    ...(opts.constantPrefix === undefined ? {} : { preimage_constant_prefix: opts.constantPrefix }),
+    preimage_fields: opts.fields,
+    preimage_separator: ":",
+    ...(opts.valuesFrom === undefined ? {} : { values_from: opts.valuesFrom }),
+    preimage_note:
+      `Rebuild: ${opts.constantPrefix === undefined ? "" : "preimage_constant_prefix, then "}the values named by preimage_fields in order, joined with preimage_separator. ` +
+      `${opts.normalization} ` +
+      `The separator is refused inside any field, so the join cannot be forged by a value containing it. ` +
+      `Check the rebuilt string against ${opts.preimageFrom} BEFORE hashing: matching a digest against the string it was taken over proves only self-consistency, and it is the string that carries the meaning.`,
+  };
+}
+
+
+// The two recipes exactly as served, exported so a test can assert on the
+// object the response carries rather than on one it builds for itself. That
+// gap is not theoretical: the first version of this change was tested against
+// a locally-constructed recipe, and a mutation that wired the WRONG version
+// constant into the served one passed the suite. Describing the helper instead
+// of the wire is the defect this whole PR is about, and it was in its own test.
+//
+// Functions rather than constants because society.ts and payouts.ts import each
+// other: a module-level constant here evaluates before payouts.ts finishes
+// initialising and throws a TDZ ReferenceError at import time.
+export const authorizationHashRecipe = () => stringPreimageRecipe({
+  fields: PAYOUT_PREIMAGE_FIELDS,
+  preimageFrom: "preimage",
+  normalization: "token and address are lowercased; chain_id and expiry are decimal strings of the integers. Values are keys of this response body, not of `payload`.",
+});
+
+export const funderAttestationHashRecipe = () => stringPreimageRecipe({
+  fields: PAYOUT_FUNDER_STATEMENT_FIELDS,
+  preimageFrom: "funder_statement",
+  valuesFrom: "payload",
+  constantPrefix: PAYOUT_FUNDER_VERSION,
+  normalization: "token, tx_hash, source_address and address are lowercased; chain_id and transfer_log_index are decimal strings of the integers. NOTE THE PREFIX: it is the payout-funder version constant, NOT the binding's `version` field, which is a different string on this same response.",
+});
 
 // ---------- attestation ----------
 

@@ -142,6 +142,34 @@ function positiveSafeInteger(name: string, value: unknown): number {
   return value;
 }
 
+// The payout rail publishes FOUR registry-computed digests and, until now, a
+// recipe for two of them. The other two are reproducible — verified against
+// binding 1 — but only by guessing, and the natural guess is wrong: the two
+// that carry a recipe are taken over a compact JSON ARRAY, and these two are
+// taken over a colon-joined STRING. A reader who assumes the shape of the
+// recipe sitting beside them hashes different bytes and gets a mismatch on a
+// digest whose whole job is to be checked.
+//
+// These lists are the published DESCRIPTION of how each string is assembled.
+// They are not used to build it — payoutPreimage and payoutFunderStatement
+// still do that from typed fields, and changing that would be a rewrite rather
+// than a disclosure. test/every-digest-says-how.test.ts rebuilds each string
+// from the list and asserts it equals what the builder returns, so a
+// description that drifts from the builder fails the suite instead of
+// misleading a stranger.
+export const PAYOUT_PREIMAGE_FIELDS = [
+  "version", "handle", "row", "amount_atomic", "chain_id", "token", "address", "expiry",
+] as const;
+
+// The funder statement's first element is the CONSTANT PAYOUT_FUNDER_VERSION,
+// not the binding's `version` — the two version strings differ and both appear
+// on the same response, so the field list starts after it and the constant is
+// published separately.
+export const PAYOUT_FUNDER_STATEMENT_FIELDS = [
+  "binding_payload_hash", "chain_id", "token", "tx_hash", "transfer_log_index",
+  "source_address", "address", "amount_atomic", "funding_relationship",
+] as const;
+
 export function payoutPreimage(fields: {
   handle: string;
   row: string;

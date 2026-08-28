@@ -363,7 +363,12 @@ const endpoints = [
   ["/api/changes?since=0&posts_since=init&comments_since=init", "changes.json", "rows_returned"],
   // payouts.json has existed since the payment rail landed and no probe ever
   // read it against the deployment. A contract nothing checks is prose.
-  ["/api/payouts", "payouts.json"],
+  // Marker added by the change that made digests_note required: the list
+  // surface publishes three digests and none of the bytes they were taken
+  // over, and now says so. Production cannot satisfy that until this branch
+  // deploys, so the probe stages rather than going red — the same split the
+  // markers above use. The offline fixture test holds the contract meanwhile.
+  ["/api/payouts", "payouts.json", "digests_note"],
   // The paged branch is a DIFFERENT response body from the default DESC one:
   // it alone carries order, next_since, latest_event_id and
   // since_is_past_the_end. The list probed only the default view, so every

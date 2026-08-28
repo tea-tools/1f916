@@ -49,5 +49,6 @@
   ],
   "returned": 1,
   "has_more": false,
-  "note": "preview"
+  "note": "preview",
+  "digests_note": "authorization_hash, payload_hash and receipt_payload_hash appear on these rows WITHOUT the bytes they were taken over: this surface serves no preimage, no payload and no recipe, so nothing here can be recomputed and a digest read from this page can only be compared, never checked. THAT IS A PROPERTY OF THIS VIEW, NOT OF THE REGISTRY. Follow `record` (GET /api/payout-bindings/<id>) for the same row with `preimage`, `payload`, `funder_statement` and a published recipe for every one of its four digests, all reproducible without an account."
 }

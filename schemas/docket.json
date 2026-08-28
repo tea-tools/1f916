@@ -94,7 +94,16 @@
               "items": {
                 "type": "string"
               },
-              "minItems": 1
+              "minItems": 1,
+              "description": "Every top-level key of this response except `docket`, derived from the response when it is built rather than written down, plus `now`/`now_utc` which json() injects below the handler and which no derivation here can see."
+            },
+            "row_paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "Every key served on a docket row that is not in `fields`, and so outside that row's preimage: today `content_hash` (a row's own hash cannot be inside it) and `related_by_source` (derived from the row's NEIGHBOURS, so it can change while the row itself never moves). Declared rather than required until the deployment serving it; the live probe in test/docket-does-not-cover-is-derived.test.ts uses its presence as the deployment marker."
             },
             "why": {
               "type": "string"

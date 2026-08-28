@@ -772,6 +772,15 @@ export function docketRowContentHash(row: Record<string, unknown>): Promise<stri
   return sha256Hex(docketRowContentPreimage(row));
 }
 
+// The two fields this handler serves and structurally cannot see. json() in
+// index.ts prepends `now` and `now_utc` to every object response at the
+// transport layer, so no amount of deriving from what docket() builds will
+// ever reach them — they are named here, with the reason, rather than left as
+// the one silent gap in a list whose whole point is that it has none. A third
+// injected field would be invisible the same way, which is what the live half
+// of the guard in test/docket-does-not-cover-is-derived.test.ts is for.
+export const TRANSPORT_INJECTED_PATHS = ["now", "now_utc"] as const;
+
 export const DOCKET_CONTENT_HASH_FIELDS = [
   "id", "title", "status", "size", "lane", "source_posts", "became",
   "decision_thread", "discussion", "claim", "delivery", "verdict",
@@ -887,7 +896,7 @@ export async function docket(sourceRevision: string | null = null) {
   const distinct = [...new Set(links)];
   const shared = Object.entries(parents).filter(([, ps]) => ps.length > 1);
 
-  return {
+  const response = {
     docket: rows,
     content_hash_recipe: {
       algorithm: "sha256",
@@ -911,9 +920,25 @@ export async function docket(sourceRevision: string | null = null) {
       // What a row hash does NOT cover, named here rather than left implied.
       // A verification contract that is silent about its edges invites a
       // reader to assume it covers the whole page (#131).
+      //
+      // DERIVED, not written down. This list used to be a hand-typed literal
+      // and it had already drifted: `source_graph` was added to this response
+      // with three derived numbers and a note, and none of the four reached
+      // this list. The block noticed and wrote its own disclosure into its own
+      // `note` instead — "Derived from `source_posts` and outside every row
+      // hash" — which is the sentence being true in the one place a reader
+      // checking the recipe will not look. Two per-row fields were outside the
+      // preimage and named nowhere at all.
+      //
+      // It is the identical lesson to the one the acceptance_coverage sentence
+      // was rebuilt for eighty lines down: a hand-written enumeration of a
+      // growing thing is a lie with a delay fuse. That fix was applied to a
+      // count and not to the list beside it.
       does_not_cover: {
-        paths: ["what_this_is", "how_to_claim", "how_to_contribute", "how_it_was_built", "counts", "decomposition.note", "acceptance_coverage.note"],
-        why: "Each content_hash anchors one docket row and nothing else. The endpoint's explanatory prose and its derived counts are outside every row hash.",
+        paths: [] as string[],
+        row_paths: [] as string[],
+        why:
+          "Each content_hash anchors one docket row and nothing else. `paths` is every top-level key of this response except `docket`, and `row_paths` is every key served on a row that is not in `fields` — both derived from the response itself when it is built, so a block added here cannot quietly escape this list. Two further edges have no hash at all and cannot be listed as paths: the SET and ORDER of rows in `docket` is anchored by nothing, so a row removed from this endpoint leaves every remaining content_hash verifying perfectly, and `related_by_source` on any row is derived from its NEIGHBOURS, so it can change while that row itself never moves.",
       },
     },
     counts,
@@ -959,4 +984,21 @@ export async function docket(sourceRevision: string | null = null) {
     how_it_was_built:
       "Seeded 2026-08-09 from a full re-read of every post and comment thread in the record. If your ask is missing, say so in the open — that is a docket bug and it gets fixed like one.",
   };
+
+  // Built from the response's own shape rather than from anyone's memory of it.
+  // `docket` is excluded because that is the one key row hashes DO anchor,
+  // row by row.
+  response.content_hash_recipe.does_not_cover.paths = [
+    ...TRANSPORT_INJECTED_PATHS,
+    ...Object.keys(response).filter((k) => k !== "docket"),
+  ].sort();
+
+  // The union across every row, not the keys of the first one: a row that omits
+  // an optional field would otherwise decide the list for all of them.
+  const hashed = new Set<string>(DOCKET_CONTENT_HASH_FIELDS);
+  response.content_hash_recipe.does_not_cover.row_paths = [
+    ...new Set(rows.flatMap((r) => Object.keys(r).filter((k) => !hashed.has(k)))),
+  ].sort();
+
+  return response;
 }

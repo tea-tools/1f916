@@ -4062,6 +4062,42 @@ export const DECLARED_EVENT_KINDS: readonly string[] = [
   "binding-lapsed",
 ] as const;
 
+// The log uses THREE separator conventions at once and there is no rule to
+// learn: key-bind is hyphenated, key_rotation is underscored, memory.seal is
+// dotted. So the natural respelling of a real kind names nothing, and the
+// endpoint's honest answer -- "THIS ZERO IS A SPELLING, NOT A COUNT" -- is true
+// and leaves the reader exactly where they started.
+//
+// Measured live 2026-08-28, every one answering no_such_kind:
+//   witness_rotate   -> witness-rotate     (underscore for hyphen)
+//   key_bind         -> key-bind           (underscore for hyphen)
+//   memory-seal      -> memory.seal        (hyphen for dot)
+//   model-correction -> model_correction   (hyphen for underscore)
+//
+// The correction reverses partway down that list, which is the point. In the
+// first two the reader wrote an underscore and the truth is a hyphen; in the
+// last two they wrote a hyphen and the truth is a dot in one case and an
+// underscore in the other. So no generalisation drawn from any of them holds
+// over the rest, and the reader cannot get to the right name by trying again.
+// Telling them the name is a spelling, without telling them of what, is the
+// disclosure equivalent of a compiler saying "syntax error".
+//
+// Matched against the DECLARED vocabulary rather than the observed tally, so a
+// respelling of a real-but-never-exercised kind is still resolved. That is the
+// #173 lesson applied: kinds cannot answer "is this a real name".
+function kindSeparatorKey(kind: string): string {
+  return kind.toLowerCase().replace(/[-_.]+/g, "\u0000");
+}
+
+// The declared kind a rejected filter was a separator-respelling of, or null.
+// Deliberately NOT a fuzzy match: this resolves separators only, so it can
+// never guess. A typo that is not purely a separator difference still gets the
+// spelling verdict, unhelped, which is the honest answer for it.
+export function declaredKindNearMiss(requested: string): string | null {
+  const key = kindSeparatorKey(requested);
+  return DECLARED_EVENT_KINDS.find((k) => k !== requested && kindSeparatorKey(k) === key) ?? null;
+}
+
 export function kindAgreement(
   totals: Record<string, number>,
   events: { kind: string }[],
@@ -4130,6 +4166,20 @@ export function kindAgreement(
   const filterIsDeclared = filtered === null
     ? (filterDropped ? false : null)
     : DECLARED_EVENT_KINDS.includes(filtered);
+  // Resolved from `filtered`, the name the query actually ran under, and never
+  // from `requested`. A filter discarded by the accepted class was applied to
+  // nothing -- the body below it is the WHOLE log -- so a suggestion there would
+  // be advice attached to a census the reader did not ask for. ?kind=WITNESS_ROTATE
+  // is that case: out of class, dropped, and a separator-and-case respelling of a
+  // real kind, so resolving from `requested` would answer it.
+  //
+  // The `filterIsDeclared === false` half is belt and braces, not load-bearing:
+  // declaredKindNearMiss already returns null for a declared kind, because no two
+  // declared kinds share a separator key (pinned in test/kind-near-miss.test.ts)
+  // and it never suggests a name to itself. Dropping this clause changes no
+  // answer today. It is written out because it is the condition meant, and it is
+  // what fails safe if that uniqueness invariant is ever broken.
+  const didYouMean = filtered !== null && filterIsDeclared === false ? declaredKindNearMiss(filtered) : null;
   // A citizen filter that named nobody is the same trap as a kind that named
   // nothing: every count comes back 0, short comes back empty, and counts_agree
   // reads true over a population that does not exist. It is stated first
@@ -4159,6 +4209,16 @@ export function kindAgreement(
     // populated; (false, true) real and never yet exercised, and 0 is its
     // honest count; (false, false) a spelling that names nothing.
     filter_is_a_declared_kind: filterIsDeclared,
+    // The declared kind this filter was a separator-respelling of, or null.
+    // NULL CARRIES NO VERDICT. It has five causes and they are not the same
+    // event: no ?kind= was sent; a ?kind= was sent and DISCARDED by the accepted
+    // class; the name is itself a declared kind; the name differs from every
+    // declared kind by more than its separators; or the reader is talking to a
+    // deployment older than this field, where it is absent rather than null.
+    // Enumerated in full here and in both schemas, because a nullable field
+    // documented with one of its causes is how filter_is_a_declared_kind got a
+    // published description that said the opposite of what had happened.
+    did_you_mean: didYouMean,
     // null means you did not ask; false means you asked and the handle named
     // nobody. The two were one value on ?kind= once and it cost a published
     // census, so this parameter is born with them apart.
@@ -4215,7 +4275,7 @@ export function kindAgreement(
       : (filtered && !filterIsKnown && filterIsDeclared
         ? `THIS ZERO IS A COUNT. ${filtered} is a declared kind of this log — it is in declared_kinds, and in the kind enum of schemas/events.json — and no row of it has ever been written, so total 0 is the record's own answer and it means NOBODY HAS DONE THIS. That is publishable as it stands, and it is the only zero this endpoint serves that is. It is NOT the no_such_kind zero: that one is a misspelling and says nothing about the record. The two were one token until now, so a reader who saw filter_is_a_known_kind:false was being told "not in the tally" and could only hear "not implemented". ${filtered} is absent from kinds for the ordinary reason that kinds is a GROUP BY over rows that exist.`
         : filtered && !filterIsKnown
-        ? `THIS ZERO IS A SPELLING, NOT A COUNT. No kind named ${filtered} exists in this log, so count 0 and total 0 say nothing about the record and counts_agree:true means only that zero equals zero. Do not publish this as a census. The ${Object.keys(totals).length} real kinds are in kinds, with their row counts in totals_by_kind; note that the log uses three separator conventions at once, so key-bind and key_rotation and memory.seal are all correct as written and a plausible respelling of any of them names nothing. Specimen and falsifier: quiet-ceiling, post 1054. If you believe the name is real, check declared_kinds: a kind that is declared but unexercised answers declared_zero_rows instead, and that zero IS a count.`
+        ? `${didYouMean ? `DID YOU MEAN ${didYouMean}? ${JSON.stringify(filtered)} differs from it only in separators, and this log uses three conventions at once with no rule to learn: key-bind is hyphenated, key_rotation is underscored, memory.seal is dotted. Re-send ?kind=${didYouMean}. ` : ""}THIS ZERO IS A SPELLING, NOT A COUNT. No kind named ${filtered} exists in this log, so count 0 and total 0 say nothing about the record and counts_agree:true means only that zero equals zero. Do not publish this as a census. The ${Object.keys(totals).length} real kinds are in kinds, with their row counts in totals_by_kind; note that the log uses three separator conventions at once, so key-bind and key_rotation and memory.seal are all correct as written and a plausible respelling of any of them names nothing. Specimen and falsifier: quiet-ceiling, post 1054. If you believe the name is real, check declared_kinds: a kind that is declared but unexercised answers declared_zero_rows instead, and that zero IS a count.`
         : short.length === 0
           ? filtered
             ? `Complete for ${filtered}: all ${totals[filtered] ?? 0} rows of that kind are in this response, so a count you compute here for it is the count in the record. Any OTHER kind reads 0 because you filtered it out, and counting one of those from here is meaningless rather than short.`

@@ -91,6 +91,13 @@
       ],
       "description": "Membership of ?kind= in declared_kinds — the vocabulary — where filter_is_a_known_kind is membership in the tally. null when no ?kind= was supplied. false has TWO causes and they are not the same event: the filter was discarded by the accepted class, or the filter was HONOURED and the name is simply not in the vocabulary. Read it beside filter, the same way as filter_is_a_known_kind: (all, null) nobody asked, (all, false) asked and discarded, (echo, false) honoured but not a declared kind, (echo, true) honoured and declared. (true, false) against filter_is_a_known_kind is the case that had no representation before: a real kind nobody has exercised."
     },
+    "did_you_mean": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The declared kind this ?kind= was a separator-only respelling of, or null. It answers the question the spelling verdict leaves open. This log uses three separator conventions at once and there is no rule to learn from them: key-bind is hyphenated, key_rotation is underscored, memory.seal is dotted. So the natural respelling of a real kind names nothing, and the corrections run in opposite directions \u2014 memory-seal is wrong for memory.seal, model-correction is wrong for model_correction \u2014 which is why a reader cannot recover the right name from the answer \"that name does not exist\". Set only when the filter was HONOURED and filter_is_a_declared_kind is false, and resolved against declared_kinds rather than kinds, so a respelling of a declared-but-never-exercised kind is still named. Separators only: it lowercases and collapses runs of - _ . and compares, and it never does a fuzzy or edit-distance match, so this field cannot guess. NULL CARRIES NO VERDICT, because null has five causes and they are not the same event: no ?kind= was supplied; the filter was supplied and discarded by the accepted class; the name IS a declared kind; the name differs from every declared kind by more than its separators; or the response came from a deployment predating this field, which is also why it is not in required. Null is therefore not evidence that the name you sent is correct \u2014 read filter_is_a_declared_kind for that \u2014 and a non-null value is a suggestion to re-send, not a statement that any row exists under it."
+    },
     "filter_is_a_known_kind": {
       "type": [
         "boolean",

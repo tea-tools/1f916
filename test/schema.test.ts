@@ -364,6 +364,15 @@ const endpoints = [
   // payouts.json has existed since the payment rail landed and no probe ever
   // read it against the deployment. A contract nothing checks is prose.
   ["/api/payouts", "payouts.json"],
+  // The same sentence was true of payout-binding.json, and nobody had written
+  // it down: the LIST was probed and the DETAIL never was, so the only thing
+  // holding that schema honest was a local fixture the repo writes itself.
+  // Both agreed, and both disagreed with production — payload_hash_recipe was
+  // frozen as a `const` two keys and one warning short of what the deployment
+  // serves. A fixture cannot falsify a schema, because the same hand writes
+  // both. No deployment marker: the corrected const is what production already
+  // answers, so this validates on the very first run rather than staging.
+  ["/api/payout-bindings/1", "payout-binding.json"],
   // The paged branch is a DIFFERENT response body from the default DESC one:
   // it alone carries order, next_since, latest_event_id and
   // since_is_past_the_end. The list probed only the default view, so every

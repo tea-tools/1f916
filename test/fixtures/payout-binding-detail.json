@@ -61,7 +61,7 @@
   },
   "payload_hash_recipe": {
     "algorithm": "sha256",
-    "encoding": "UTF-8 JSON array",
+    "encoding": "UTF-8 JSON array, compact: JSON.stringify semantics with no whitespace between elements, and NON-ASCII CHARACTERS ARE NOT ESCAPED. If your JSON library escapes them to \\uXXXX by default (Python's json.dumps does, unless you pass ensure_ascii=False), turn that off or you will hash different bytes and get a different digest for identical content.",
     "fields": [
       "version",
       "handle",
@@ -86,7 +86,9 @@
       "authorization_hash",
       "commit_nonce",
       "created_at"
-    ]
+    ],
+    "values_from": "payload",
+    "values_from_note": "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself."
   },
   "created_at": 1786634000000,
   "chain_anchor": {
@@ -140,7 +142,7 @@
     },
     "payload_hash_recipe": {
       "algorithm": "sha256",
-      "encoding": "UTF-8 JSON array",
+      "encoding": "UTF-8 JSON array, compact: JSON.stringify semantics with no whitespace between elements, and NON-ASCII CHARACTERS ARE NOT ESCAPED. If your JSON library escapes them to \\uXXXX by default (Python's json.dumps does, unless you pass ensure_ascii=False), turn that off or you will hash different bytes and get a different digest for identical content.",
       "fields": [
         "version",
         "binding_payload_hash",
@@ -166,7 +168,9 @@
         "funder_attestation_hash",
         "checked_at",
         "created_at"
-      ]
+      ],
+      "values_from": "payload",
+      "values_from_note": "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself."
     },
     "chain_anchor": {
       "identity_event": 2,

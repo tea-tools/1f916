@@ -2542,7 +2542,7 @@ export async function createPayoutBinding(env: Env, citizen: Citizen, body: Payo
     authorization_hash: binding.authorizationHash,
     payload_hash: payloadHash,
     payload,
-    payload_hash_recipe: { algorithm: "sha256", encoding: ENCODING_NOTE, fields: PAYOUT_BINDING_HASH_FIELDS, values_from: "payload", values_from_note: "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself." },
+    payload_hash_recipe: payloadHashRecipe(PAYOUT_BINDING_HASH_FIELDS),
     created_at: now,
     chained: committed.hash,
     chain_anchor: chainAnchor,
@@ -3372,7 +3372,7 @@ export async function getPayoutBinding(env: Env, id: number) {
     ? {
         ...receipt,
         payload: storedPayoutReceiptPayload(binding, receipt),
-        payload_hash_recipe: { algorithm: "sha256", encoding: ENCODING_NOTE, fields: PAYOUT_RECEIPT_HASH_FIELDS, values_from: "payload", values_from_note: "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself." },
+        payload_hash_recipe: payloadHashRecipe(PAYOUT_RECEIPT_HASH_FIELDS),
         chain_anchor: await payoutAnchorByPayload(env, binding.citizen_id, "payout-receipt", String(receipt.payload_hash)),
       }
     : null;
@@ -3408,7 +3408,7 @@ export async function getPayoutBinding(env: Env, id: number) {
     authorization_hash: binding.authorization_hash,
     payload_hash: binding.payload_hash,
     payload: bindingPayload,
-    payload_hash_recipe: { algorithm: "sha256", encoding: ENCODING_NOTE, fields: PAYOUT_BINDING_HASH_FIELDS, values_from: "payload", values_from_note: "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself." },
+    payload_hash_recipe: payloadHashRecipe(PAYOUT_BINDING_HASH_FIELDS),
     created_at: binding.created_at,
     chain_anchor: chainAnchor,
     receipt: receiptView,
@@ -3606,7 +3606,7 @@ export async function createPayoutReceipt(env: Env, submitter: Citizen, bindingI
     checked_at: payment.checkedAt,
     payload_hash: payloadHash,
     payload,
-    payload_hash_recipe: { algorithm: "sha256", encoding: ENCODING_NOTE, fields: PAYOUT_RECEIPT_HASH_FIELDS, values_from: "payload", values_from_note: "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself." },
+    payload_hash_recipe: payloadHashRecipe(PAYOUT_RECEIPT_HASH_FIELDS),
     created_at: now,
     chained: committed.hash,
     chain_anchor: chainAnchor,
@@ -7313,8 +7313,43 @@ export async function identityLog(env: Env, kind: string | null = null, sinceId:
 // citizen puts an accent or a dash in a listing title, which nothing stops.
 // Nobody reported this one; I hit it by following my own recipe as a stranger
 // would, which is the only way it surfaces.
-const ENCODING_NOTE =
+export const ENCODING_NOTE =
   "UTF-8 JSON array, compact: JSON.stringify semantics with no whitespace between elements, and NON-ASCII CHARACTERS ARE NOT ESCAPED. If your JSON library escapes them to \\uXXXX by default (Python's json.dumps does, unless you pass ensure_ascii=False), turn that off or you will hash different bytes and get a different digest for identical content.";
+
+// The recipe object served beside a payload_hash, built in ONE place so the
+// published rule cannot drift from the rule the server hashes by. It had drifted:
+// schemas/payout-binding.json froze this as a `const` reading
+// `encoding: "UTF-8 JSON array"` with no `values_from`, while the deployment
+// served the full ENCODING_NOTE and both values_from keys, so every
+// GET /api/payout-bindings/:id production answered violated its own published
+// contract on the one field whose whole job is to tell a stranger how to
+// reproduce a digest. Nothing noticed because that endpoint was not in
+// schema.test.ts's live list and the local fixture had been written to match
+// the schema rather than derived from the wire. See
+// test/payout-digest-recipes-are-published.test.ts, which pins schema, source
+// and deployment to each other.
+//
+// The two omissions were not cosmetic. The dropped half of `encoding` is the
+// non-ASCII escaping warning, which is the trap this repo warns strangers about
+// elsewhere and which silently produces a WRONG digest rather than an error.
+// The dropped `values_from` is what says `fields` names keys of `payload` and
+// not of the response body. A reader who built against the schema instead of
+// the response got neither.
+//
+// The note above ENCODING_NOTE already settled this: "UTF-8 JSON array" did
+// not say enough, found by following the recipe as a stranger would. The
+// source was fixed then. The schema still published the sentence that was not
+// enough, and went on publishing it as a JSON Schema `const`.
+export function payloadHashRecipe(fields: readonly string[]) {
+  return {
+    algorithm: "sha256",
+    encoding: ENCODING_NOTE,
+    fields,
+    values_from: "payload",
+    values_from_note:
+      "fields names keys of the `payload` object in this response, not of the response body. Where a recipe omits values_from, the fields are keys of the response body itself.",
+  };
+}
 
 // ---------- attestation ----------
 

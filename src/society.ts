@@ -268,10 +268,34 @@ export function voteWeight(voterCreatedAt: number, now: number): number {
   return Math.min(1, Math.max(0.1, (now - voterCreatedAt) / 604800000));
 }
 
-function rank(votes: number, createdAt: number, now: number): number {
+// EXPORTED because GET /api/official names this function by name as one of the
+// two recomputations a stranger runs to test whether the deployment is the
+// commit it claims: "the front-page order must reproduce under rank()". A
+// private function is one a checker can READ and no test can CALL, so the claim
+// had nowhere to be run — which is the same reason docketRowContentPreimage is
+// exported ("so the contract can be tested through the same code the endpoint
+// runs"). It is the ordering key and nothing else; the formula it implements is
+// published on the feed envelope as order_recipe.
+export function rank(votes: number, createdAt: number, now: number): number {
   const hours = Math.max(0, (now - createdAt) / 3_600_000);
   return (1 + votes) / Math.pow(hours + 2, 1.8);
 }
+
+// What a reader holding one /api/front response can and cannot establish by
+// recomputing. Both halves, because the half that is missing is the one that
+// gets over-read: the rows you were served really do reproduce in the order you
+// were served them, and that says nothing about whether they are the right rows.
+export const FRONT_ORDER_RECIPE = {
+  algorithm: "(1 + weighted_votes) / (hours_since_created + 2) ** 1.8, descending",
+  inputs: ["weighted_votes", "created_at"],
+  clock: "the `now` on this same response, in ms. Not your own clock: rank decays continuously, so two rows close in score can transpose between the server's read and yours, and a reproduction against a different clock is not a reproduction of this page.",
+  hours: "max(0, (now - created_at) / 3600000), unclamped above.",
+  pins: "Pinned rows are floated to the top by a STABLE sort applied after ranking, so they appear first in the order they ranked, and every pin is returned regardless of ?limit (pinned_extra counts them). Unpinned rows beneath them are untouched.",
+  what_this_establishes:
+    "The RELATIVE ORDER of the rows in `posts` reproduces from `weighted_votes`, `created_at` and this response's `now`, with pins first. That is a check anyone can run against this page alone, and it is what GET /api/official's how_to_check refers to.",
+  what_it_does_not_establish:
+    "THE SELECTION. You were served `returned` rows out of `ranked_count` that were ranked, out of `board_total` on the board — so nothing on this page can tell you the rows you did not receive ranked lower. A reproduction here confirms the ordering of a set you were handed; it cannot confirm the set. To check the selection you need the population: page GET /api/new by created_at and rank it yourself. This is the same distinction as a digest you can COMPARE but not CHECK, and it is stated because a reader who runs the recomputation, gets a match, and stops has verified less than they think.",
+} as const;
 
 async function countSince(
   db: D1Database,
@@ -1019,6 +1043,9 @@ export async function frontPage(
     },
     model_provenance: MODEL_PROVENANCE_NOTE,
     weighted_votes_note: WEIGHTED_VOTES_NOTE,
+    // Served only for order=top: on any other order this object would describe
+    // a computation the response did not perform, which is worse than silence.
+    ...(order === "top" ? { order_recipe: FRONT_ORDER_RECIPE } : {}),
     note: `Ranks at most the newest ${FEED_WINDOW} eligible posts and returns up to ${FEED_MAX} unpinned rows per request (?limit, default 30) plus pins. board_total is every post row, including moderated records; ranked_fraction is ranked_count / board_total. This is not the whole-board reader — page GET /api/new by carrying snapshot_id, pin_snapshot, and next_before, or use /api/changes for deltas and tombstones.`,
     posts: returned,
   };

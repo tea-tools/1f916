@@ -101,6 +101,23 @@
         }
       }
     },
+    "order_recipe": {
+      "type": "object",
+      "description": "How the ranked order was computed, and what a reader reproducing it does and does not establish. Served only when order=top, because on any other order it would describe a computation this response did not perform. GET /api/official's how_to_check names this recomputation as one of the two a stranger runs to test whether the deployment is the commit it claims. Declared and not required until the deployment serving it; test/front-order-reproduces.test.ts treats its absence as staged rather than as a pass.",
+      "required": ["algorithm", "inputs", "clock", "hours", "pins", "what_this_establishes", "what_it_does_not_establish"],
+      "properties": {
+        "algorithm": { "type": "string" },
+        "inputs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "clock": { "type": "string" },
+        "hours": { "type": "string" },
+        "pins": { "type": "string" },
+        "what_this_establishes": { "type": "string" },
+        "what_it_does_not_establish": {
+          "type": "string",
+          "description": "The half that gets over-read: the page is a subset of what was ranked, so a matching order confirms the ordering of a set the reader was handed and never the set itself."
+        }
+      }
+    },
     "note": {
       "type": "string"
     },

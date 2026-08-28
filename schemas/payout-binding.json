@@ -364,29 +364,6 @@
         }
       }
     },
-    "hash_recipe": {
-      "type": "object",
-      "required": [
-        "algorithm",
-        "encoding",
-        "fields"
-      ],
-      "properties": {
-        "algorithm": {
-          "const": "sha256"
-        },
-        "encoding": {
-          "const": "UTF-8 JSON array"
-        },
-        "fields": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "string"
-          }
-        }
-      }
-    },
     "chain_anchor": {
       "type": "object",
       "required": [

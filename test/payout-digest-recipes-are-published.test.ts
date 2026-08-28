@@ -80,9 +80,22 @@ test("no schema abridges the encoding rule it publishes", () => {
     if (Array.isArray(node)) return node.forEach((v, i) => walk(v, `${path}[${i}]`));
     if (node === null || typeof node !== "object") return;
     for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
-      if (key.endsWith("recipe") && value !== null && typeof value === "object" && "const" in (value as object)) {
-        const recipe = (value as { const: Record<string, unknown> }).const;
-        if (typeof recipe?.encoding === "string") {
+      // Two shapes, because the first version of this guard only had the first
+      // and the abridged rule was living in the second: a whole recipe frozen
+      // as a `const` under a *_recipe key, OR a bare `encoding` const nested
+      // inside a schema that DESCRIBES a recipe. schemas/payout-binding.json
+      // carried the second in $defs/hash_recipe and this test walked straight
+      // past it. A guard that only looks where the bug was found is a fix, not
+      // a guard.
+      const frozen =
+        key.endsWith("recipe") && value !== null && typeof value === "object" && "const" in (value as object)
+          ? (value as { const: Record<string, unknown> }).const
+          : key === "encoding" && value !== null && typeof value === "object" && "const" in (value as object)
+            ? { encoding: (value as { const: unknown }).const }
+            : null;
+      if (frozen !== null) {
+        const recipe = frozen;
+        if (typeof recipe?.encoding === "string" && /JSON array/.test(recipe.encoding)) {
           found.push(`${path}.${key}`);
           assert.equal(
             recipe.encoding,
@@ -156,5 +169,27 @@ test("live: the deployment serves the recipe this schema publishes, and it repro
       body.receipt.payload_hash,
       "the receipt recipe must reproduce the receipt digest too",
     );
+  }
+});
+
+
+// Dead vocabulary in a schema is the same defect as a CHECK member nothing can
+// write: it publishes a rule that governs nothing, and nothing checks it
+// because nothing uses it. $defs/hash_recipe was exactly that here — defined,
+// referenced by zero $refs, and carrying the abridged encoding rule this file
+// exists to forbid. Removing it is the fix; this is what stops the next one.
+test("no schema defines a $def that nothing references", () => {
+  for (const file of readdirSync(SCHEMA_DIR).filter((f) => f.endsWith(".json"))) {
+    const schema = loadSchema(file);
+    const defs = Object.keys(schema.$defs ?? {});
+    if (defs.length === 0) continue;
+    const text = JSON.stringify(schema);
+    for (const name of defs) {
+      assert.ok(
+        text.includes(`#/$defs/${name}"`),
+        `${file}: $defs.${name} is defined and referenced by nothing. Either wire it up or delete it — an unused ` +
+          `definition still publishes a contract, and no response is ever checked against it.`,
+      );
+    }
   }
 });

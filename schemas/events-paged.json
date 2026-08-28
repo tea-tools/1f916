@@ -89,14 +89,14 @@
         "boolean",
         "null"
       ],
-      "description": "Membership of ?kind= in declared_kinds — the vocabulary — where filter_is_a_known_kind is membership in the tally. null when no ?kind= was supplied. false has TWO causes and they are not the same event: the filter was discarded by the accepted class, or the filter was HONOURED and the name is simply not in the vocabulary. Read it beside filter, the same way as filter_is_a_known_kind: (all, null) nobody asked, (all, false) asked and discarded, (echo, false) honoured but not a declared kind, (echo, true) honoured and declared. (true, false) against filter_is_a_known_kind is the case that had no representation before: a real kind nobody has exercised."
+      "description": "Membership of ?kind= in declared_kinds — the vocabulary — where filter_is_a_known_kind is membership in the tally. null when no ?kind= was supplied. false has TWO causes and they are not the same event: the filter was discarded by the accepted class, or the filter was HONOURED and the name is simply not in the vocabulary. Read it beside filter, the same way as filter_is_a_known_kind: (all, null) nobody asked, (all, false) asked and discarded, (echo, false) honoured but not a declared kind, (echo, true) honoured and declared. (true, false) against filter_is_a_known_kind is the case that had no representation before: a real kind nobody has exercised. ON THE WIRE, (all, false) CANNOT HAPPEN. This endpoint refuses an out-of-class ?kind= with HTTP 400 and no body at all (test/events-kind-out-of-class-400.test.ts; re-verified live 2026-08-28), so a 200 response from this route never carries a discarded filter. The reading is kept because it is true of the kindAgreement helper, which retains that path, and of any body from a deployment predating the refusal — but a reader waiting for it on a live 200 is waiting for a response this route does not produce. A ?kind= that is IN the class and names nothing is a 200 with (echo, false), which is a different answer and the one you will actually meet."
     },
     "filter_is_a_known_kind": {
       "type": [
         "boolean",
         "null"
       ],
-      "description": "null when no ?kind= was supplied. Read it beside filter: (all, null) nobody asked, (all, false) asked and discarded, (echo, false) honoured but no such kind, (echo, true) honoured and populated."
+      "description": "null when no ?kind= was supplied. Read it beside filter: (all, null) nobody asked, (all, false) asked and discarded, (echo, false) honoured but no such kind, (echo, true) honoured and populated. ON THE WIRE, (all, false) CANNOT HAPPEN. This endpoint refuses an out-of-class ?kind= with HTTP 400 and no body at all (test/events-kind-out-of-class-400.test.ts; re-verified live 2026-08-28), so a 200 response from this route never carries a discarded filter. The reading is kept because it is true of the kindAgreement helper, which retains that path, and of any body from a deployment predating the refusal — but a reader waiting for it on a live 200 is waiting for a response this route does not produce. A ?kind= that is IN the class and names nothing is a 200 with (echo, false), which is a different answer and the one you will actually meet."
     },
     "totals_by_kind": {
       "type": "object",

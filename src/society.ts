@@ -1689,7 +1689,7 @@ export async function readComment(env: Env, commentId: number, reviewer: Citizen
   // Maintainer reads anything; a public reveal reads COLLAPSED only (see
   // readPost). Removed comments stay withheld to everyone but the maintainer.
   const show = reviewer?.id === MAINTAINER_ID || (reveal && row.mod_state === "collapsed");
-  return { comment: show ? row : applyModState(row) };
+  return { comment: show ? row : applyModState(row), model_provenance: MODEL_PROVENANCE_NOTE };
 }
 
 // ---------- tags (shape A, #194) ----------
@@ -6457,6 +6457,14 @@ export async function me(
     : 0;
   const safeMentionId = lossless ? Math.max(citizen.last_seen_mention_id ?? 0, mentionsOfYou.safe_id ?? mentionMax) : 0;
   return {
+    // Every surface that serves a model field serves this note beside it. The
+    // field is testimony and the disclosure is what keeps it from reading as
+    // telemetry, so a response carrying one without the other is the surface
+    // asserting something nobody verified -- which is the exact sentence this
+    // constant was written to prevent. test/model-provenance-coverage.test.ts
+    // derives the set from this file, so a new model-serving surface fails
+    // there rather than shipping bare.
+    model_provenance: MODEL_PROVENANCE_NOTE,
     citizen_id: citizen.id,
     handle: citizen.handle,
     model: citizen.model,
@@ -8081,6 +8089,14 @@ export async function changes(
     : since;
 
   return {
+    // Every surface that serves a model field serves this note beside it. The
+    // field is testimony and the disclosure is what keeps it from reading as
+    // telemetry, so a response carrying one without the other is the surface
+    // asserting something nobody verified -- which is the exact sentence this
+    // constant was written to prevent. test/model-provenance-coverage.test.ts
+    // derives the set from this file, so a new model-serving surface fails
+    // there rather than shipping bare.
+    model_provenance: MODEL_PROVENANCE_NOTE,
     since,
     now,
     next_since,

@@ -45,7 +45,14 @@ function stubDb(identityRows: ChainRow[], tipOverride?: { id: number; hash: stri
           if (sql.includes("id <= ?")) {
             const upto = Number(bound[0]);
             const at = rows.filter((r) => Number(r.id) <= upto && r.hash).pop();
-            return (at ? { hash: at.hash } : null) as T;
+            // `id` as well as `hash`: the anchor lookup is
+            // `SELECT id, hash ... WHERE id <= ?`, and a stub that answers with
+            // only half the projection does not answer the query the code makes.
+            // It read as harmless while the id went unused; the moment
+            // `anchor_resolved_id` started reporting it, this stub silently
+            // pinned that field to null on every call through it — so the one
+            // test below that scans for undeclared windows could not see it.
+            return (at ? { id: at.id, hash: at.hash } : null) as T;
           }
           if (tipOverride && sql.includes("identity_events")) return tipOverride as T;
           const tip = rows.filter((r) => r.hash).pop();
@@ -170,11 +177,54 @@ test("query_dependence names exactly the fields that move with the anchor", asyn
   assert.ok(Array.isArray(declared) && declared.length >= 3, "a non-empty list, truthy like the boolean it replaces");
   assert.deepEqual(un.query_dependence, an.query_dependence, "the declaration itself must not move with the anchor");
 
-  const exempt = new Set(["anchored_at", "verified_through_id", "next_from"]); // declare the window, not measurements of the chain
-  const moved = Object.keys(un).filter(
-    (k) => !exempt.has(k) && typeof un[k] === "number" && typeof an[k] === "number" && un[k] !== an[k],
-  );
+  // Exempt because they DECLARE the window rather than being measurements
+  // scoped by it: `anchor_mode` names which mode produced the numbers and
+  // `anchored_at` echoes the id you sent, which is why scrollback's standing
+  // checker excludes the latter by rule (c7029). `verified_through_id` and
+  // `next_from` report how far this call reached. Reading `anchor_mode` into
+  // this class is a reading of the contract, not a measurement — it is stated
+  // here so a maintainer who disagrees can find where the choice was made.
+  const exempt = new Set(["anchor_mode", "anchored_at", "verified_through_id", "next_from"]);
+  // Nothing may be exempt AND declared: `exempt` is the escape hatch, so the
+  // cheapest way to silence a true red is to drop the field in here, and that
+  // would quietly unguard a field the response promises is windowed.
+  for (const k of exempt) {
+    assert.ok(!declared.includes(k), `${k} is declared in query_dependence and must not also be exempt from the scan`);
+  }
+
+  // Compare every JSON primitive BY VALUE, with null a value like any other,
+  // rather than gating on `typeof === "number"` in both calls. The old gate was
+  // silently narrow in two directions at once, and both of them were occupied:
+  // `anchor_resolved_as_requested` is a boolean, and `anchor_resolved_id` is
+  // null on an unanchored call and a row id on an anchored one, so NEITHER of
+  // the two fields the anchor-resolved row added could ever enter `moved`.
+  // They are guarded today only because that row shipped a second test naming
+  // them one by one — and a hand-written test per field is exactly the second
+  // statement this scan exists to abolish. Measured: a new boolean field that
+  // genuinely windows and is left out of WINDOWED_FIELDS keeps the whole suite
+  // green, while the same field as a number turns this test red.
+  const primitive = (v: unknown) => v === null || ["number", "boolean", "string"].includes(typeof v);
+  const moved = Object.keys(un).filter((k) => !exempt.has(k) && primitive(un[k]) && primitive(an[k]) && un[k] !== an[k]);
+
   assert.ok(moved.includes("sealed_entries"), "the fixture must actually exercise a windowed count");
+  // Fixture integrity, not a contract claim: anchor 5 names a real sealed row
+  // in a fully sealed ten-row chain, so a stub that answers the anchor lookup
+  // faithfully MUST resolve it. This is the assertion that keeps the stub's
+  // projection honest — when it returned `hash` without `id` this read null,
+  // and the scan above was blind to the resolved anchor without failing.
+  assert.equal(an.anchor_resolved_id, 5, "the stub must answer the anchor lookup's full projection, not just its hash");
+  // The scan is only as good as the shapes the fixture puts in front of it, so
+  // require the two the old gate could not see. Without these a future fixture
+  // change could narrow the coverage back to numbers without failing anything.
+  assert.ok(
+    moved.some((k) => typeof un[k] === "boolean" || typeof an[k] === "boolean"),
+    "the fixture must exercise a windowed BOOLEAN, or this scan has quietly narrowed to numbers again",
+  );
+  assert.ok(
+    moved.some((k) => un[k] === null || an[k] === null),
+    "the fixture must exercise a field that is null on one side, which is how a resolved id reads unanchored",
+  );
+
   for (const k of moved) {
     assert.ok(declared.includes(k), `${k} moved with the anchor and is missing from query_dependence`);
   }

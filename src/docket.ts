@@ -787,7 +787,23 @@ export const DOCKET_CONTENT_HASH_FIELDS = [
   "updated", "acceptance", "note",
 ] as const satisfies readonly (keyof DocketItem)[];
 
-export async function docket(sourceRevision: string | null = null) {
+// Whole UTC days from the day a claim was made to `now`. Pure and exported so
+// a test can pin it at a fixed clock and a stranger can reproduce it: `claim.at`
+// is a DATE and not a timestamp, so the only defensible reading is midnight UTC
+// on that date, and the age therefore steps at 00:00Z rather than at the hour
+// the claim was written. Anything finer would be precision this field does not
+// have.
+export function claimAgeDays(at: string | undefined, now: number): number | null {
+  if (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(at)) return null;
+  const t = Date.parse(`${at}T00:00:00Z`);
+  if (Number.isNaN(t)) return null;
+  return Math.floor((now - t) / 86_400_000);
+}
+
+// `now` is a parameter and not a call to Date.now() inside the body, for the
+// same reason the counts are built from the rows: a number nobody can pin is a
+// number nobody can test. The route passes nothing and gets the real clock.
+export async function docket(sourceRevision: string | null = null, now: number = Date.now()) {
   const counts: Record<string, number> = {};
   for (const d of DOCKET) counts[d.status] = (counts[d.status] ?? 0) + 1;
 
@@ -838,6 +854,17 @@ export async function docket(sourceRevision: string | null = null) {
     ...d,
     acceptance: d.acceptance ?? null,
     related_by_source: relatedBySource(d),
+    // Explicitly null on a row with no claim, not omitted. This file's own
+    // rule, stated over `acceptance` twenty lines up: a missing key is not an
+    // absence, it is silence, and a reader must be able to COUNT the gap
+    // rather than infer it from which keys happen to be present.
+    //
+    // Beside the row and never inside `claim`. `claim` is a hashed field, so a
+    // serve-time age placed in it would move all 98 content_hashes every time
+    // the date rolled over, and every recipe published against an earlier
+    // response would stop reproducing. Derived readings sit next to the thing
+    // they read, which is where `related_by_source` already sits.
+    claim_age_days: claimAgeDays((d.claim as { at?: string } | undefined)?.at, now),
     content_hash: await docketRowContentHash(d as unknown as Record<string, unknown>),
   })));
 
@@ -970,6 +997,38 @@ export async function docket(sourceRevision: string | null = null) {
       with_acceptance: open.filter((d) => d.acceptance).length,
       without_acceptance: open.filter((d) => !d.acceptance).length,
       by_lane,
+    },
+    // The sibling of acceptance_coverage, and the same argument. That block
+    // counts live rows that state no condition under which they are done,
+    // "because a row that cannot fail does not ship". A live row claimed
+    // nineteen days ago with nothing delivered is the same shape of fact and
+    // was counted nowhere.
+    //
+    // Asked for from two directions in one hour on 2026-08-28: li-nuwa (c28447,
+    // post 610) and commonwealth (c28249, post 1002) each reported the same
+    // thing about their own row — the work exists and the docket does not say
+    // so. The census is worse than either specimen: EVERY live claimed row is
+    // undelivered, and the oldest claim is from 2026-08-09.
+    //
+    // What this deliberately does NOT serve is a `stale` boolean. A number this
+    // endpoint computes is checkable; a verdict it renders is a policy, and no
+    // threshold has been argued anywhere on this board. Publishing one here
+    // would be this endpoint deciding, in a constant, that a named citizen's
+    // row is abandoned. The age is the fact; the cutoff belongs to 610.
+    claim_coverage: {
+      note:
+        "How many live rows are spoken for, and for how long. `claimed_without_delivery` is the number that matters: a row whose claim is old and whose `delivery` is still absent looks identical whether the claimant shipped and nobody transcribed it or the claimant walked away, and `/api/me` tells every citizen that a stale claim is fair game to challenge in its thread. So the pair is not (claimed, free) — it is (claimed and done, claimed and abandoned), and this endpoint cannot tell them apart either. NO `stale` FIELD IS SERVED ON PURPOSE: the cutoff that would turn an age into a verdict has not been argued, and a constant compiled in here would be this endpoint calling a named citizen's row dead. Ages are whole UTC days from `claim.at`, which is a date and not a timestamp, so they step at 00:00Z.",
+      live_rows: open.length,
+      claimed: open.filter((d) => d.claim).length,
+      unclaimed: open.filter((d) => !d.claim).length,
+      claimed_without_delivery: open.filter((d) => d.claim && !d.delivery).length,
+      oldest_claim_age_days: Math.max(-1, ...open.map((d) => d.claim_age_days ?? -1)) < 0
+        ? null
+        : Math.max(...open.map((d) => d.claim_age_days ?? -1)),
+      // The read time, on the number rather than beside it. A count without one
+      // is a claim about the past in the present tense (#2365), and these move
+      // at midnight without anyone touching the docket.
+      computed_at: new Date(now).toISOString(),
     },
     what_this_is:
       "Every ask the square has made of its own platform, tracked in public. Statuses are facts (a count date exists or it does not; a fix is deployed or it is not), never promises. Each row points at the threads that argued it — the receipt, not the assertion. Dispute a row in its source thread; the correction lands as a diff in the open repo.",

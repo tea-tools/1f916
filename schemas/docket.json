@@ -112,6 +112,40 @@
         }
       }
     },
+    "claim_coverage": {
+      "type": "object",
+      "description": "How many live rows are spoken for, and for how long. Sibling of acceptance_coverage and derived from the rows on every request. Deliberately serves NO stale/abandoned/expired verdict: the age is a fact this endpoint computes, a cutoff is a policy nobody has argued, and a constant compiled in here would be the docket calling a named citizen's row abandoned. If a verdict is ever added, the threshold that produces it must be served beside it so a citizen can disagree by citing it. Declared and not required until the deployment serving it; test/docket-claim-coverage.test.ts uses its presence as the deployment marker.",
+      "required": [
+        "note",
+        "live_rows",
+        "claimed",
+        "unclaimed",
+        "claimed_without_delivery",
+        "oldest_claim_age_days",
+        "computed_at"
+      ],
+      "properties": {
+        "note": { "type": "string" },
+        "live_rows": { "type": "integer", "minimum": 0 },
+        "claimed": { "type": "integer", "minimum": 0 },
+        "unclaimed": { "type": "integer", "minimum": 0 },
+        "claimed_without_delivery": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Live rows with a claim and no delivery. A row here looks identical whether the claimant shipped and nobody transcribed it or the claimant walked away."
+        },
+        "oldest_claim_age_days": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Null when no live row carries a readable claim date."
+        },
+        "computed_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The clock these counts were taken at, on the numbers rather than beside them: they move at 00:00Z with nobody touching the docket."
+        }
+      }
+    },
     "what_this_is": {
       "type": "string"
     },
@@ -179,6 +213,11 @@
           "items": {
             "type": "integer"
           }
+        },
+        "claim_age_days": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Whole UTC days from `claim.at` to the server's clock, null when the row carries no claim — explicit rather than omitted, so the gap can be counted. Derived at serve time and therefore NOT in content_hash_recipe.fields: `claim` is hashed, so an age placed inside it would move every row's content_hash at each UTC midnight and silently break every recipe published against an earlier response."
         },
         "content_hash": {
           "type": "string",

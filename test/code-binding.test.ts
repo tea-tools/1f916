@@ -16,6 +16,9 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { officialFacts, type Env } from "../src/society.ts";
+import { SURFACE } from "../src/surface.ts";
+import { chainRecipe, type ChainedTable } from "../src/chain.ts";
+import { LIVE_PROBES, LIVE_SKIP_REASON, RateLimited, liveFetch } from "./helpers/live.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const base = { TREASURY_ADDRESS: "0xa7F7985eB19b8c44F12A0654Df1eF89d1dd527C9" } as unknown as Env;
@@ -105,5 +108,116 @@ test("every repo path named in how_to_check actually exists", () => {
   assert.ok(paths.length > 0, "how_to_check should name at least one file to recompute against");
   for (const p of paths) {
     assert.ok(existsSync(join(ROOT, p)), `how_to_check names ${p}, which does not exist in this repo`);
+  }
+});
+
+// The three tests below are the ENDPOINT half of the guard above it, and they
+// exist because the path half was written after src/rank.ts was found in this
+// same string naming a file that has never existed at any commit. The lesson
+// recorded there — "a recomputation recipe is prose until someone runs it" —
+// was applied to the repo paths it names and not to the endpoints it names or
+// to the containment it asserts. Those are the two halves a stranger actually
+// executes.
+//
+// It is not a hypothetical gap. The books are at /treasury; /api/treasury is a
+// 404 that answers with a did_you_mean. One keystroke in this string makes the
+// instruction unattemptable in exactly the way src/rank.ts did, and nothing
+// here would have noticed.
+
+const HOW = () => officialFacts({ ...base, BUILD_COMMIT: "abc123", BUILD_TREE: "clean" } as Env).code.how_to_check;
+
+// The endpoints the instruction names, taken out of the string the same way the
+// paths are: whatever a reader would copy.
+const namedEndpoints = (how: string) => [...new Set(how.match(/\bGET (\/[A-Za-z0-9_./-]*)/g)?.map((m) => m.slice(4)) ?? [])];
+
+test("every endpoint named in how_to_check is a route this registry serves", () => {
+  const how = HOW();
+  const named = namedEndpoints(how);
+  assert.ok(named.length >= 2, `how_to_check should name the surfaces to recompute; found ${named.length}`);
+  const served = new Set(SURFACE.map((r) => r.path));
+  for (const path of named) {
+    assert.ok(
+      served.has(path),
+      `how_to_check tells a stranger to GET ${path}, which is not a route on /api/surface. ` +
+        `An instruction naming a route that does not exist is not merely unhelpful: the reader ` +
+        `gets a 404, and honest_limit on this same object invites them to read a failed ` +
+        `recomputation as the running code diverging from the named commit.`,
+    );
+  }
+});
+
+// The containment the instruction ASSERTS, run rather than described — and run
+// through the code that builds the response, so it fails if either side moves.
+const PAIRING: ReadonlyArray<readonly [string, ChainedTable]> = [
+  ["/api/events", "identity_events"],
+  ["/treasury", "ledger"],
+];
+
+test("how_to_check names the pairing, because the reader cannot guess which chain goes with which route", () => {
+  const how = HOW();
+  for (const [path, table] of PAIRING) {
+    assert.ok(
+      new RegExp(`${path.replace(/\//g, "\\/")}[^.]*chainRecipe\\("${table}"\\)|chainRecipe\\("${table}"\\)[^.]*${path.replace(/\//g, "\\/")}`).test(how),
+      `how_to_check must say that ${path} carries chainRecipe("${table}"). Left unbound, "chainRecipe(table)" ` +
+        `is two endpoints and two tables and the reader has to guess; half the guesses produce a non-match, ` +
+        `and a non-match here reads as divergence.`,
+    );
+  }
+});
+
+test("live: the deployment serves what how_to_check says it serves", async (t) => {
+  if (!LIVE_PROBES) {
+    t.skip(LIVE_SKIP_REASON);
+    return;
+  }
+  const official = await liveFetch("https://1f916.ai/api/official", { headers: { "User-Agent": "1f916-code-binding-check/1.0" } });
+  if (official.status === 429) throw new RateLimited("rate limited reading /api/official");
+  assert.equal(official.status, 200);
+  const code = ((await official.json()) as Record<string, any>).code;
+
+  // The states this endpoint declares about itself, checked before anything is
+  // recomputed against them. honest_limit says a dirty tree makes any
+  // recomputation void, so running one anyway and reporting the result would be
+  // manufacturing a finding out of a state the deployment already disclosed.
+  assert.ok(code, "/api/official must carry a code block");
+  if (code.commit === null) {
+    t.skip("the deployment says it cannot name its commit; there is nothing to recompute against");
+    return;
+  }
+  assert.match(code.commit, /^[0-9a-f]{40}$/);
+  if (code.tree !== "clean") {
+    t.skip(`the deployment reports tree=${JSON.stringify(code.tree)}; honest_limit says recomputation against it proves nothing`);
+    return;
+  }
+
+  for (const [path, table] of PAIRING) {
+    const r = await liveFetch(`https://1f916.ai${path}`, { headers: { "User-Agent": "1f916-code-binding-check/1.0" } });
+    if (r.status === 429) throw new RateLimited(`rate limited reading ${path}`);
+    assert.equal(r.status, 200, `how_to_check names ${path} and the deployment does not serve it`);
+    const served = ((await r.json()) as Record<string, any>).how_to_verify;
+    assert.equal(typeof served, "string", `${path} must carry how_to_verify, which is the field how_to_check tells a reader to read`);
+
+    const mine = chainRecipe(table);
+    if (!served.includes(mine)) {
+      // A mismatch here is only a finding about the DEPLOYMENT when this
+      // checkout is the commit it names. Otherwise it is the ordinary case of a
+      // branch that has moved, and reporting it as divergence is the exact
+      // misattribution honest_limit warns about. Said out loud rather than
+      // swallowed, so a real drift is never mistaken for this.
+      t.diagnostic(
+        `${path}: served how_to_verify does not contain chainRecipe(${JSON.stringify(table)}) as built from this checkout. ` +
+          `Deployment commit ${code.commit}. If this checkout is not that commit, that is expected and says nothing.`,
+      );
+      t.skip(`staged: this checkout is not the deployed commit ${code.commit.slice(0, 7)}, so the containment check is not attributable`);
+      return;
+    }
+
+    // And the pairing, which is the half a reader gets wrong: each route must
+    // carry ITS chain's recipe and not the other one.
+    const other = PAIRING.find(([p]) => p !== path)![1];
+    assert.ok(
+      !served.includes(chainRecipe(other)),
+      `${path} serves the recipe for ${other} as well as its own; the pairing how_to_check publishes would then be arbitrary`,
+    );
   }
 });

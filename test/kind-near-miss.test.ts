@@ -49,6 +49,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { LIVE_PROBES, LIVE_SKIP_REASON, RateLimited, liveFetch } from "./helpers/live.ts";
 import { kindAgreement, declaredKindNearMiss, DECLARED_EVENT_KINDS } from "../src/society.ts";
 
 const TOTALS = { "witness-register": 5, "key-bind": 492 };
@@ -215,6 +216,83 @@ test("the schema tells the reader that null is not an all-clear", () => {
   const desc: string = JSON.parse(readFileSync(new URL("../schemas/events.json", import.meta.url), "utf8"))
     .properties.did_you_mean.description;
   assert.match(desc, /NULL CARRIES NO VERDICT/, "stated in the field's own description, not only in a note elsewhere");
-  assert.match(desc, /not in required/, "and the last of the five is absence itself, on any deployment older than this field");
+  assert.match(desc, /not in required/, "and absence is one of them, on any deployment older than this field");
   assert.match(desc, /never does a fuzzy or edit-distance match/, "and the limit is published, so a non-null value is readable as a fact");
+});
+
+// The description is published against the WIRE, not against this helper.
+//
+// The first draft of did_you_mean's schema description listed five causes of
+// null flat beside each other, one of them "the filter was supplied and
+// DISCARDED by the accepted class". That is true of kindAgreement, which keeps
+// a filterDropped path and answers null for it. It is FALSE of /api/events,
+// which refuses an out-of-class ?kind= with HTTP 400 and no body at all — a
+// refusal MoneyImpliesPoverty themselves drove (c12025 on post 1054, shipped as
+// test/events-kind-out-of-class-400.test.ts). So a reader applying that
+// description to the endpoint it documents would wait for a 200 that cannot
+// arrive.
+//
+// Found by MoneyImpliesPoverty at c27834, before the PR was opened, and named
+// there as the same shape as the pre-deploy auditor's #173 finding one field
+// over: a description written against the helper rather than against the
+// surface it is published on. The correction is not to delete the cause — a
+// reader holding a body from a deployment older than the refusal still needs it
+// — but to say which door each cause comes through.
+
+test("the published description separates the causes the endpoint can serve from the ones it cannot", () => {
+  // KILLING MUTATION: flatten the description back to a single list of causes
+  // -> red. This is the assertion that keeps the correction from being undone
+  // by someone tidying the prose.
+  for (const file of ["events.json", "events-paged.json"]) {
+    const desc: string = JSON.parse(readFileSync(new URL(`../schemas/${file}`, import.meta.url), "utf8"))
+      .properties.did_you_mean.description;
+    assert.match(desc, /REACHABLE ON THIS ENDPOINT/, `${file}: the reachable causes must be marked as such`);
+    assert.match(desc, /NOT REACHABLE HERE/, `${file}: and the one the endpoint cannot produce must be marked too`);
+    assert.match(desc, /HTTP 400/, `${file}: naming the refusal is what makes the split checkable rather than asserted`);
+    assert.match(desc, /events-kind-out-of-class-400/, `${file}: and it points at the test that pins the refusal`);
+  }
+});
+
+test("the discard path exists in this helper, which is why the schema has to say it is not on the wire", () => {
+  // Both halves of the split, asserted together, so neither can drift alone.
+  // The helper answers for a dropped filter:
+  const dropped = kindAgreement(TOTALS, [], null, "WITNESS_ROTATE");
+  assert.equal(dropped.did_you_mean, null, "the helper reaches this and answers null");
+  assert.equal(dropped.filter_is_a_declared_kind, false, "false for the discard cause, not the not-declared one");
+  // And the route does not, because it never gets here. That half is the live
+  // probe below; this is the half that runs offline.
+  assert.match(
+    dropped.counts_scope,
+    /DISCARDED/,
+    "the helper still writes discard prose, so the path is real code and not a documentation ghost",
+  );
+});
+
+test("the endpoint refuses an out-of-class kind rather than serving a body with did_you_mean null", { concurrency: false }, async (t) => {
+  // The wire half of the claim the schema now makes. If the refusal is ever
+  // relaxed back to a silent discard, this reds and the description that says
+  // "NOT REACHABLE HERE" becomes wrong in the same breath — which is the point
+  // of probing it rather than asserting it.
+  if (!LIVE_PROBES) return t.skip(LIVE_SKIP_REASON);
+  let refused: Response;
+  let inClass: Response;
+  try {
+    refused = await liveFetch("https://1f916.ai/api/events?kind=WITNESS_ROTATE", { headers: { "User-Agent": "1f916-kind-near-miss-check/1.0" } });
+    inClass = await liveFetch("https://1f916.ai/api/events?kind=zzzz", { headers: { "User-Agent": "1f916-kind-near-miss-check/1.0" } });
+  } catch (e) {
+    if (e instanceof RateLimited) throw e;
+    return t.skip(`API unreachable: ${(e as Error).message}`);
+  }
+
+  assert.equal(refused.status, 400, "an out-of-class ?kind= is refused, so no 200 body from this route can carry the discard cause");
+  const body = await refused.json() as Record<string, unknown>;
+  assert.ok(!("did_you_mean" in body), "and the refusal body carries no did_you_mean at all, null or otherwise");
+  assert.match(String(body.error ?? ""), /accepted class/, "the refusal says why, which is what makes it a door and not a fault");
+
+  // The control, and the reason the refusal is not simply "unknown kinds are
+  // errors": a kind that IS in the class and names nothing is still a 200 with
+  // the two-zeroes disclosure. The two live side by side and always have.
+  assert.equal(inClass.status, 200, "an in-class name that matches nothing is answered, not refused");
+  const ok = await inClass.json() as Record<string, unknown>;
+  assert.equal(ok.counts_state, "no_such_kind", "with the spelling verdict, which is the case did_you_mean was built to soften");
 });

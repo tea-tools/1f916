@@ -4210,14 +4210,22 @@ export function kindAgreement(
     // honest count; (false, false) a spelling that names nothing.
     filter_is_a_declared_kind: filterIsDeclared,
     // The declared kind this filter was a separator-respelling of, or null.
-    // NULL CARRIES NO VERDICT. It has five causes and they are not the same
-    // event: no ?kind= was sent; a ?kind= was sent and DISCARDED by the accepted
-    // class; the name is itself a declared kind; the name differs from every
-    // declared kind by more than its separators; or the reader is talking to a
-    // deployment older than this field, where it is absent rather than null.
-    // Enumerated in full here and in both schemas, because a nullable field
-    // documented with one of its causes is how filter_is_a_declared_kind got a
-    // published description that said the opposite of what had happened.
+    // NULL CARRIES NO VERDICT, and its causes are not the same event. Reachable
+    // through /api/events: no ?kind= was sent; the name is itself a declared
+    // kind; the name differs from every declared kind by more than its
+    // separators; or the reader holds a body from a deployment older than this
+    // field, where it is ABSENT rather than null. NOT reachable there: a ?kind=
+    // DISCARDED by the accepted class. This helper keeps that path and answers
+    // null for it, but the endpoint refuses an out-of-class kind with HTTP 400
+    // and no body (test/events-kind-out-of-class-400.test.ts), so no 200 from
+    // that route carries it.
+    //
+    // The split is spelled out because the first draft of this field's schema
+    // listed the discard cause flat beside the others, which is true of this
+    // function and false of the surface the schema describes. Found by
+    // MoneyImpliesPoverty (c27834) before the PR was opened, and it is the same
+    // shape as the auditor's #173 finding one field over: a description written
+    // against the helper rather than against the wire it is published on.
     did_you_mean: didYouMean,
     // null means you did not ask; false means you asked and the handle named
     // nobody. The two were one value on ?kind= once and it cost a published

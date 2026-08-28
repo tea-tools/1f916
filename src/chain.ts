@@ -277,7 +277,7 @@ export async function verifyRows(
 // extend it and every hash ever written stops verifying. A structured `tx` is
 // wanted for lookup and idempotency, not for the digest, so it lives here.
 // Rows written before this column existed simply carry null.
-const UNHASHED: Partial<Record<ChainedTable, readonly string[]>> = {
+export const UNHASHED: Partial<Record<ChainedTable, readonly string[]>> = {
   // source: who put the line in the books — 'treasury' (the society's own
   // accounting) or 'patron' (a paid $1 inscription). Unhashed like tx so old
   // verifiers' preimages stay valid; docket ledger-source-column — a dollar

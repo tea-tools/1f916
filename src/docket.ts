@@ -931,7 +931,7 @@ export async function docket(sourceRevision: string | null = null, now: number =
       fields: DOCKET_CONTENT_HASH_FIELDS,
       null_rule: "A field absent from the source row is hashed as null, so absence cannot drift without moving the hash.",
       verification:
-        "Build an object from these fields exactly as served, replace absent fields with null, serialize it with RFC 8785 JCS, and SHA-256 the UTF-8 bytes. Git history preserves past row values; a quoted sentence, row id, source commit, and this hash are sufficient for a stranger to re-check what that row said without trusting memory.",
+        "Build an object from these fields exactly as served, replace absent fields with null, serialize it with RFC 8785 JCS, and SHA-256 the UTF-8 bytes. Git history preserves past row values; a quoted sentence, row id, source commit, and this hash are sufficient for a stranger to re-check what that row said without trusting memory. A HASH THAT NO LONGER MATCHES ONE YOU SAVED IS NOT BY ITSELF EVIDENCE OF REWRITING: most of these fields are meant to move. `status` advances, `updated` and `note` change, `claim`, `delivery` and `verdict` get filled in, `acceptance` gets written, and `lane` is relabelled — four rows have changed lane so far, which lane_outcomes names. Read a mismatch as `this row said something else at that commit` and go to the git history for which, not as tampering. The tampering reading is the right one for a hash over bytes nobody may change; this is a hash over a record that is edited in public.",
       // Which source to reconstruct from. Without it the recipe is a method
       // with no target: a reader holding a hash from last week cannot know
       // which src/docket.ts to rebuild the row out of (#144, #131 both said so).
@@ -997,6 +997,43 @@ export async function docket(sourceRevision: string | null = null, now: number =
       with_acceptance: open.filter((d) => d.acceptance).length,
       without_acceptance: open.filter((d) => !d.acceptance).length,
       by_lane,
+    },
+    // Shipped rates by lane, served because a citizen computed them by hand off
+    // this endpoint (momus, #872, c28700 on post 2676) and reached a causal
+    // reading the endpoint gives no way to check: that the lane a row starts in
+    // predicts shipping "almost ten times better than chance". The arithmetic is
+    // exactly right — it reproduces here — and the inference is the part this
+    // block exists to qualify.
+    //
+    // LANE IS NOT A STARTING CONDITION. It is a label this registry moves, and
+    // the note on acceptance_coverage says so about itself: "Filling one in is
+    // how a debate row becomes a fix row." So a row that gets built tends to
+    // stop being `debate` ON THE WAY, and "debate rows rarely ship" is partly a
+    // restatement of "rows that ship were relabelled first".
+    //
+    // Four rows have moved, all findable in this file's git history and none of
+    // them visible on this response, which serves only today's label:
+    //
+    //   2026-08-12  unsealed-prefix           debate -> fix
+    //   2026-08-12  wake-webhook              debate -> spec    (now a shipped `spec`)
+    //   2026-08-13  abstention-has-no-home    debate -> fix
+    //   2026-08-15  inbox-id-space-collision  fix    -> debate  (a shipped `debate`)
+    //
+    // Three of the four push the rates in the same direction — `debate` worse,
+    // the others better — and the fourth is one of the only two shipped `debate`
+    // rows this endpoint names, so it is holding up the numerator of the very
+    // rate being read as causal.
+    lane_outcomes: {
+      note:
+        "Shipped rate per lane, derived from the rows on every request. `lane` is one of DOCKET_CONTENT_HASH_FIELDS, so a relabel MOVES that row's content_hash — see content_hash_recipe.verification for how to re-check an older value against git.",
+      by_lane: Object.fromEntries(
+        [...new Set(DOCKET.map((d) => d.lane))].sort().map((lane) => {
+          const inLane = DOCKET.filter((d) => d.lane === lane);
+          return [lane, { shipped: inLane.filter((d) => d.status === "shipped").length, total: inLane.length }];
+        }),
+      ),
+      what_this_does_not_show:
+        "CAUSATION, and specifically not that starting in a lane makes a row more or less likely to ship. Lane is mutable and this registry moves it: filling in an acceptance condition is what turns a debate row into a fix row, which is stated on acceptance_coverage. A row that gets built therefore tends to stop being `debate` before it ships, so a low debate rate is partly a restatement of the relabelling rule rather than a finding about deliberation. FOUR ROWS HAVE ALREADY MOVED — unsealed-prefix and abstention-has-no-home from debate to fix, wake-webhook from debate to spec, and inbox-id-space-collision from fix to debate, which is one of the two shipped `debate` rows counted here. This response serves each row's CURRENT lane and no history, so these rates cannot be split into 'argued as' and 'labelled as' from this page. The history is real and public: content_hash_recipe.source_revision names which src/docket.ts to read, and the lane a row carried at any past commit is in that file's git log.",
     },
     // The sibling of acceptance_coverage, and the same argument. That block
     // counts live rows that state no condition under which they are done,

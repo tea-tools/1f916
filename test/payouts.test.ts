@@ -76,6 +76,13 @@ const signedReceiptInput = async (fields: {
 const hashPayload = (fields: readonly string[], payload: Record<string, unknown>) =>
   createHash("sha256").update(JSON.stringify(fields.map((field) => payload[field]))).digest("hex");
 
+// A value guaranteed to serialise differently from the one it replaces, for any
+// type a payload field can hold. Wrapping in an array works where `+ 1` does not:
+// the declared field lists carry strings, numbers, nulls and a JSON string, and a
+// perturbation that only knows how to bump a number silently tests nothing on the
+// other twenty.
+const perturb = (value: unknown): unknown => [value];
+
 async function signedBinding() {
   const wallet = privateKeyToAccount(generatePrivateKey());
   const ed = generateKeyPairSync("ed25519");
@@ -516,8 +523,11 @@ test("a reproduced finalized Base-USDC transfer joins binding, docket, and a sec
     assert.equal(paid.funder_statement, paid.payload.funder_statement);
     assert.equal(paid.funding_relationship, "independent");
     assert.equal(hashPayload(PAYOUT_RECEIPT_HASH_FIELDS, paid.payload as Record<string, unknown>), paid.payload_hash);
-    for (const field of ["submitter_id", "confirmations_at_recording", "checked_at", "created_at"]) {
-      const changed = { ...(paid.payload as Record<string, unknown>), [field]: Number((paid.payload as Record<string, unknown>)[field]) + 1 };
+    // Derived from the declared list rather than hand-picked. This loop used to
+    // name four fields of the twenty-four, so twenty were declared as hashed and
+    // proven so by nothing.
+    for (const field of PAYOUT_RECEIPT_HASH_FIELDS) {
+      const changed = { ...(paid.payload as Record<string, unknown>), [field]: perturb((paid.payload as Record<string, unknown>)[field]) };
       assert.notEqual(hashPayload(PAYOUT_RECEIPT_HASH_FIELDS, changed), paid.payload_hash, `${field} must be anchored`);
     }
     const detail = await getPayoutBinding(env, Number(binding.id));
@@ -849,5 +859,85 @@ test("the Base RPC helper sends a User-Agent, or every provider refuses us", () 
     src.slice(i, i + 700),
     /"user-agent"\s*:/,
     "the Base RPC fetch must set a user-agent; without it every provider answers 403 and the rail reports a disagreement that never happened",
+  );
+});
+
+// Every field the BINDING recipe declares is anchored — and the one that a
+// migration is about to rewrite in place.
+//
+// GET /api/payout-bindings/:id serves three things together: `payload`,
+// `payload_hash`, and `payload_hash_recipe`, the last of which tells a stranger
+// exactly how to reduce the first to the second (sha256 over the compact JSON
+// array of the declared fields, in order). That triple is the registry's offer
+// to be checked by someone who trusts none of it, and it is checkable today:
+// measured 2026-08-28T08:2xZ against production, all 139 bindings reproduce
+// their published payload_hash from their published payload, and all 139 carry
+// citizen_key_custody "self" as field 13 of the 23.
+//
+// The receipt side of this file already had a sensitivity loop, over four
+// hand-picked fields of twenty-four. The binding side had none, so the twenty-
+// three fields the recipe publishes were anchored by assertion only. Both loops
+// now derive from the declared list, because the gap between "declared hashed"
+// and "proven hashed" is where a field gets edited by something that believes
+// it is editing a label.
+//
+// The live case, and the reason this is written now rather than later: upstream
+// PR #172's migration 0041 rebuilds payout_bindings and writes the literal
+// 'undeclared' into citizen_key_custody for every historical row, carrying
+// payload_hash through unchanged. Its comment beside that INSERT reads "The
+// preimage and both signatures are untouched — this column was never inside the
+// signed bytes." That is true of the signatures and says nothing about the hash:
+// payload_hash is a third integrity value with its own published recipe, and
+// this column is inside it. The migration's reasoning about custody is sound —
+// 'self' was the only value the column could hold, so re-reading it as
+// affirmative testimony would invent a claim nobody made. The snapshot column in
+// payout_bindings is the one place that argument does not reach, because there
+// the byte is not testimony, it is what the hash was taken over.
+
+test("every field the binding recipe declares is anchored in the hash it publishes", async () => {
+  const fixture = await signedBinding();
+  const { env } = makeFullEnv(fixture.publicKey);
+  const created = await createPayoutBinding(env, CITIZEN as never, fixture.body);
+  const detail = await getPayoutBinding(env, Number(created.id));
+  const payload = detail.payload as Record<string, unknown>;
+
+  // Guard the guard, twice over: a recipe that shrank to nothing, or a payload
+  // that stopped reproducing, would make every assertion below vacuous.
+  assert.ok(PAYOUT_BINDING_HASH_FIELDS.length >= 20, `the binding recipe declares ${PAYOUT_BINDING_HASH_FIELDS.length} fields`);
+  assert.equal(hashPayload(PAYOUT_BINDING_HASH_FIELDS, payload), detail.payload_hash, "the served payload must reduce to the served hash before any of this means anything");
+  assert.deepEqual(
+    [...PAYOUT_BINDING_HASH_FIELDS].filter((field) => !(field in payload)),
+    [],
+    "the recipe names the keys of the served payload; a field it names and the payload lacks hashes as undefined and can never be checked",
+  );
+
+  // KILLING MUTATION: drop any field from PAYOUT_BINDING_HASH_FIELDS while
+  // leaving it in the payload -> that field stops being anchored and this reds.
+  for (const field of PAYOUT_BINDING_HASH_FIELDS) {
+    const changed = { ...payload, [field]: perturb(payload[field]) };
+    assert.notEqual(hashPayload(PAYOUT_BINDING_HASH_FIELDS, changed), detail.payload_hash, `${field} must be anchored`);
+  }
+});
+
+test("rewriting citizen_key_custody in place makes the stored payload_hash unreproducible", async () => {
+  // The specific case, with the migration's own literal rather than a synthetic
+  // perturbation, so this test states the consequence in the terms the change is
+  // written in. It is not an argument against declaring custody, and not an
+  // argument against 'undeclared': it is the reason the snapshot column and the
+  // keys cache cannot migrate the same way.
+  const fixture = await signedBinding();
+  const { env } = makeFullEnv(fixture.publicKey);
+  const created = await createPayoutBinding(env, CITIZEN as never, fixture.body);
+  const detail = await getPayoutBinding(env, Number(created.id));
+  const payload = detail.payload as Record<string, unknown>;
+
+  assert.equal(payload.citizen_key_custody, "self", "the value every existing binding was hashed over");
+  assert.equal(hashPayload(PAYOUT_BINDING_HASH_FIELDS, payload), detail.payload_hash);
+
+  const migrated = { ...payload, citizen_key_custody: "undeclared" };
+  assert.notEqual(
+    hashPayload(PAYOUT_BINDING_HASH_FIELDS, migrated),
+    detail.payload_hash,
+    "a row whose custody byte was rewritten no longer reduces to its own stored payload_hash, and the registry publishes the recipe that proves it",
   );
 });

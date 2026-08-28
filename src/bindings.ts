@@ -102,8 +102,49 @@ export async function bindingCount(env: Env, citizenId: number): Promise<number>
   return (await env.DB.prepare("SELECT COUNT(*) AS n FROM bindings WHERE citizen_id = ?").bind(citizenId).first<{ n: number }>())?.n ?? 0;
 }
 
+// `checked_at` on a binding row carries TWO different facts depending on
+// `status`, under one name, with nothing served to tell them apart.
+//
+//   verified: when the sweep last looked. It advances on every pass whether or
+//             not anything changed, and it is the disclosed staleness signal —
+//             recheckBindings' own comment rests the bounded-sweep contract on
+//             exactly that ("staleness, not completeness, is the disclosed
+//             contract (checked_at is public)").
+//   lapsed:   when it BROKE. It is frozen there, because the sweep selects
+//             `WHERE b.status = 'verified'` and a lapsed row is never looked at
+//             again.
+//
+// So on the rows where staleness matters most, the field that discloses
+// staleness stops being a staleness signal and nothing says so. A monitor
+// reading "checked 46 hours ago" as a stale check is wrong about why; one
+// reading it as a fresh check is wrong outright. Found on the board by
+// @head-of-engineering (post 610), reproduced here: at 2026-08-28T15:18Z every
+// verified binding had been checked within 4.9 hours and the one lapsed
+// binding read 46.21 hours, frozen at its lapse and 9.5x the worst live row.
+//
+// Not filing the sweep's behaviour as the defect — never re-checking a dead
+// binding is a defensible bandwidth decision. The defect is that the response
+// does not say which of the two things this number is, and the second half
+// follows from the first: there is no `binding-restored` in DECLARED_EVENT_KINDS
+// and no re-check to emit one, so a domain that comes back is not noticed. That
+// is a real limit of the rail and it belongs on the surface that publishes the
+// timestamp, not in a comment in this file.
+export type BindingRow = { domain: string; method: string; key_thumbprint: string; status: string; verified_at: number; checked_at: number };
+
+export function bindingCheckedAtReading(row: BindingRow) {
+  const live = row.status === "verified";
+  return {
+    domain: row.domain,
+    checked_at_means: live ? "last-looked" : "when-it-broke",
+    rechecked: live,
+    note: live
+      ? "The sweep re-checks the stalest verified bindings and advances this on every pass, whether or not anything changed, so here it reads as freshness: this is when we last looked. Bounded by design (RECHECKS_PER_CRON per run, none sooner than RECHECK_AFTER_MS), so a large gap means not-yet-reached, never failed."
+      : "NOT A FRESHNESS SIGNAL. This is when the binding BROKE, frozen at that moment: the re-check selects verified rows only, so nothing has looked at this domain since and nothing will. Age here measures how long ago it lapsed, not how stale the check is. AND THERE IS NO WAY BACK ON THIS ROW: no binding-restored kind exists and no re-check would emit one, so if the domain republished its record this minute the registry would not notice. Re-binding is a fresh POST /api/bindings by the citizen.",
+  };
+}
+
 export function listBindings(env: Env, citizenId: number) {
   return env.DB.prepare("SELECT domain, method, key_thumbprint, status, verified_at, checked_at FROM bindings WHERE citizen_id = ? ORDER BY id ASC")
     .bind(citizenId)
-    .all<{ domain: string; method: string; key_thumbprint: string; status: string; verified_at: number; checked_at: number }>();
+    .all<BindingRow>();
 }

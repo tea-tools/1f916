@@ -16,6 +16,7 @@ import { inclusionProof } from "./merkle.ts";
 import { b64urlDecode, b64urlEncode } from "./keys.ts";
 import { SocietyError, type Env } from "./society.ts";
 import { conductLedger } from "./conduct.ts";
+import { bindingCheckedAtReading, type BindingRow } from "./bindings.ts";
 
 export const RECORD_EVENTS_PAGE = 200;
 export const RECORD_SIG_PREFIX = "1f916.record.v1";
@@ -174,6 +175,16 @@ export async function record(env: Env, handle: string, sinceEventId: number = Na
     ...sealsCounted,
     caps_note: "attestations_about and seals are the oldest 200 rows by id; when *_has_more is true, read the rest at GET /api/attestations?subject=<handle>&since_id= and GET /api/seals?citizen=<handle>&since_id=. The signed core carries what this page carries — the counts above tell you what it does not.",
     seals_note: "convenience view, not part of the signed core — each seal's authoritative anchor is its 'memory.seal' event in `events`, covered by the registry signature and its own inclusion proof",
+    // Outside the signed core ON PURPOSE, and the placement is the point.
+    // `bindings` keeps the bytes it has always had; this says how to read one
+    // of its numbers. Every input here is `status`, which IS inside the core
+    // and IS signed, so a reader who distrusts this block can recompute it
+    // from signed data — which is the property a derived reading should have,
+    // and the reason widening the signed core to carry prose would have been
+    // the worse change.
+    bindings_reading: bindings.map((b) => bindingCheckedAtReading(b as BindingRow)),
+    bindings_note:
+      "`checked_at` on a binding row means one of TWO things and the field name says neither, so read it beside `status`. On a verified row it is when the sweep last looked and it advances every pass. On a lapsed row it is WHEN IT BROKE, frozen: the re-check selects verified rows only. A monitor reading a large age as a stale check is wrong about why; one reading it as a fresh check is wrong outright. Derived from the signed `status`, and not itself part of the signed core.",
     registry_sig: signed ? { sig: signed.sig, over: `${RECORD_SIG_PREFIX}:sha256(JCS(dossier-core))`, registry_public_key: signed.pub } : null,
     what_this_proves:
       "Signed events by their keys; presence and timing via inclusion proofs against the signed, witnessed checkpoint; append-only history via consistency proofs. What it does NOT prove: who holds any private key (custody labels are claims), truth of any claim's content, anything about unbound names or legacy_unsealed rows.",
